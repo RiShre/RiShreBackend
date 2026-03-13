@@ -6,7 +6,7 @@ import { GoogleGenAI } from "@google/genai";
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 10000;
   app.use(express.json());
 
   // --- CONFIGURATION ---
@@ -179,7 +179,7 @@ async function startServer() {
     });
   }
 
-  app.listen("0.0.0.0", () => {
+  app.listen(Number(PORT), "0.0.0.0", () => {
     console.log(`🚀 RiShre AI Command Center running on http://localhost:${PORT}`);
   });
 }
