@@ -1,17 +1,28 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import cors from "cors";
 import { searchWeb } from "./src/services/SearchServices.ts";
 import { GoogleGenAI } from "@google/genai";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  // 🔥 FINAL EDIT 1: Render ke liye Dynamic Port (Sabse Zaroori)
+  const PORT = Number(process.env.PORT) || 3000;
+
+  // Enable CORS for all origins and allow custom headers
+  app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-api-key", "Authorization"]
+  }));
+
   app.use(express.json());
 
   // --- CONFIGURATION ---
-  // RiShre Security Protocol: Private Token & Endpoint
-  const HF_TOKEN = "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"; 
+  // 🔥 FINAL EDIT 2: Security Update (Env variable support add kiya)
+  const HF_TOKEN = process.env.HF_TOKEN || "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"; 
   const HF_URL = "https://rexprimematrix-rishreai.hf.space/api/chat";
 
   // --- API Routes ---
@@ -54,7 +65,6 @@ async function startServer() {
 
     try {
       // 1. Try Hugging Face Router (Stable Diffusion v1.5)
-      // Note: api-inference.huggingface.co is deprecated (410 Gone)
       const hfUrl = "https://router.huggingface.co/hf-inference/models/runwayml/stable-diffusion-v1-5";
       
       console.log(`🔄 Attempting HF Image Gen: ${hfUrl}`);
@@ -62,6 +72,7 @@ async function startServer() {
         headers: { Authorization: `Bearer ${HF_TOKEN}` },
         method: "POST",
         body: JSON.stringify({ inputs: prompt }),
+        signal: AbortSignal.timeout(30000) // 30 second timeout
       });
 
       if (response.ok) {
@@ -129,6 +140,7 @@ async function startServer() {
           "x-gemini-api-key": apiKey || "" // Pass API key if available
         },
         body: JSON.stringify({ message }),
+        signal: AbortSignal.timeout(60000) // 60 second timeout for chat
       });
 
       if (response.ok) {
@@ -173,7 +185,6 @@ async function startServer() {
       } else if (status === 401 || status === 403) {
         errorMsg = "Security Breach: Token Invalid or Access Denied.";
       } else if (status === 400 || status === 422) {
-        // Often these errors from HF Spaces mean missing parameters or API keys
         const body = await response.text();
         if (body.toLowerCase().includes("api key")) {
           errorMsg = "API key is missing or invalid. Please provide a valid Gemini API key in Settings.";
@@ -218,8 +229,9 @@ async function startServer() {
     });
   }
 
+  // 🔥 FINAL EDIT 3: "0.0.0.0" ensure karta hai ki Render easily connect kar sake
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 RiShre AI Command Center running on http://localhost:${PORT}`);
+    console.log(`🚀 RiShre AI Command Center running on port ${PORT}`);
   });
 }
 
