@@ -140,7 +140,7 @@ async function startServer() {
           "x-gemini-api-key": apiKey || "" // Pass API key if available
         },
         body: JSON.stringify({ message }),
-        signal: AbortSignal.timeout(60000) // 60 second timeout for chat
+        signal: AbortSignal.timeout(180000) // 60 second timeout for chat
       });
 
       if (response.ok) {
