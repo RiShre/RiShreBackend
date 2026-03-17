@@ -123,108 +123,97 @@ async function startServer() {
   });
 
   app.post("/api/chat", async (req, res) => {
-  const { message } = req.body;
+    const { message } = req.body;
+    const userApiKey = req.headers["x-api-key"] as string;
+    const systemApiKey = process.env.GEMINI_API_KEY;
+    const apiKey = userApiKey || systemApiKey;
 
-  console.log("⚡ Fast Route → HF Inference API");
+    console.log("🔄 Connecting to RiShre Private Core...");
 
-  try {
-    // 🔥 STEP 1: Try FAST HF Inference API
-    const fastResponse = await fetch(
-      "https://api-inference.huggingface.co/models/bartowski/Mistral-7B-Instruct-v0.3-GGUF",
-      {
+    try {
+      // Try Hugging Face Space first
+      const response = await fetch(HF_URL, {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "Authorization": `Bearer ${HF_TOKEN}`,
-          "Content-Type": "application/json"
+          "x-gemini-api-key": apiKey || "" // Pass API key if available
         },
-        body: JSON.stringify({
-          inputs: message,
-          options: { wait_for_model: true }
-        }),
-        signal: AbortSignal.timeout(15000)
-      }
-    );
-
-    if (fastResponse.ok) {
-      const data = await fastResponse.json();
-
-      let reply = "";
-
-      if (Array.isArray(data)) {
-        reply = data[0]?.generated_text || "";
-      } else if (data.generated_text) {
-        reply = data.generated_text;
-      }
-
-      console.log("✅ FAST HF Response");
-      return res.json({ text: reply });
-    }
-
-    console.warn("⚠️ Fast API failed → switching to Space");
-
-  } catch (err) {
-    console.warn("⚠️ Fast API error → switching to Space");
-  }
-
-  // 💀 STEP 2: FALLBACK → HF SPACE (tera existing system)
-  try {
-    console.log("🤖 Backup Route → HF Space");
-
-    const response = await fetch(HF_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${HF_TOKEN}`
-      },
-      body: JSON.stringify({ message }),
-      signal: AbortSignal.timeout(60000)
-    });
-
-    if (response.ok) {
-      const text = await response.text();
-
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { text };
-      }
-
-      console.log("✅ HF Space Response");
-      return res.json(data);
-    }
-
-    console.warn("⚠️ Space failed → trying Gemini fallback");
-
-  } catch (err) {
-    console.warn("⚠️ Space error → trying Gemini fallback");
-  }
-
-  // 🔥 STEP 3: FINAL FALLBACK → GEMINI
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    if (apiKey) {
-      console.log("🧠 Final fallback → Gemini");
-
-      const ai = new GoogleGenAI({ apiKey });
-
-      const geminiRes = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: [{ parts: [{ text: message }] }]
+        body: JSON.stringify({ message }),
+        signal: AbortSignal.timeout(180000) // 60 second timeout for chat
       });
 
-      return res.json({ text: geminiRes.text });
-    }
-  } catch (err) {
-    console.error("❌ Gemini fallback failed");
-  }
+      if (response.ok) {
+        const text = await response.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          data = { text: text };
+        }
+        console.log("✅ Neural Link Established. Response received.");
+        return res.json(data);
+      }
 
-  // 💀 FINAL ERROR
-  res.status(500).json({
-    error: "All AI systems failed. RiShre Core offline 💀"
+      // If HF Space fails, try direct Gemini fallback if we have an API key
+      const status = response.status;
+      console.warn(`⚠️ HF Core returned status ${status}. Attempting direct fallback...`);
+
+      if (apiKey) {
+        try {
+          console.log("🔄 Falling back to direct Gemini Chat...");
+          const ai = new GoogleGenAI({ apiKey });
+          const geminiRes = await ai.models.generateContent({
+            model: "gemini-1.5-flash",
+            contents: [{ parts: [{ text: message }] }]
+          });
+          
+          const responseText = geminiRes.text;
+          
+          console.log("✅ Direct Gemini Fallback Success");
+          return res.json({ text: responseText });
+        } catch (geminiError: any) {
+          console.error("❌ Direct Gemini Fallback Failed:", geminiError.message);
+          // Continue to error handling if fallback also fails
+        }
+      }
+
+      // Error handling if both HF and fallback fail
+      let errorMsg = `Space Error: ${status}`;
+      if (status === 503) {
+        errorMsg = "RiShre AI is waking up... Give it 30 seconds.";
+      } else if (status === 401 || status === 403) {
+        errorMsg = "Security Breach: Token Invalid or Access Denied.";
+      } else if (status === 400 || status === 422) {
+        const body = await response.text();
+        if (body.toLowerCase().includes("api key")) {
+          errorMsg = "API key is missing or invalid. Please provide a valid Gemini API key in Settings.";
+        }
+      }
+
+      return res.status(status).json({ error: errorMsg });
+
+    } catch (error: any) {
+      console.error("⚠️ Connection Failed:", error.message);
+      
+      // Try direct Gemini fallback on connection error too
+      if (apiKey) {
+        try {
+          console.log("🔄 Connection error. Falling back to direct Gemini Chat...");
+          const ai = new GoogleGenAI({ apiKey });
+          const geminiRes = await ai.models.generateContent({
+            model: "gemini-1.5-flash",
+            contents: [{ parts: [{ text: message }] }]
+          });
+          return res.json({ text: geminiRes.text });
+        } catch (fallbackError) {
+          // Ignore fallback error and throw original
+        }
+      }
+      
+      res.status(500).json({ error: "RiShre Core is unreachable. Check your internet connection." });
+    }
   });
-});
 
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
