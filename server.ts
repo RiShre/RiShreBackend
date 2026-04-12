@@ -23,7 +23,7 @@ async function startServer() {
   // --- CONFIGURATION ---
   // 🔥 FINAL EDIT 2: Security Update (Env variable support add kiya)
   const HF_TOKEN = process.env.HF_TOKEN || "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"; 
-  const HF_URL = "https://rexprimematrix-rishreai.hf.space/api/chat";
+  const HF_URL = "https://rexprimematrix-rishre-ai.hf.space/api/chat";
 
   // --- API Routes ---
   app.get("/api/health", (req, res) => {
