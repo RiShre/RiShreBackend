@@ -94,63 +94,71 @@ async function startServer() {
   });
 
   // 🔥 STREAMING CHAT ROUTE (The Fix)
-  app.post("/api/chat", async (req, res) => {
-    const { message } = req.body;
-    const userApiKey = req.headers["x-api-key"] as string;
-    const systemApiKey = process.env.GEMINI_API_KEY;
-    const apiKey = userApiKey || systemApiKey;
+  // 🔥 Updated /api/chat route in server.ts
+app.post("/api/chat", async (req, res) => {
+  const { message } = req.body;
+  const HF_TOKEN = process.env.HF_TOKEN || "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";
+  const HF_URL = "https://rexprimematrix-rishre-ai.hf.space/api/chat";
 
-    console.log("🔄 Connecting to RiShre Private Core (Streaming)...");
+  console.log("🔄 Connecting to RiShre Core...");
+
+  try {
+    const response = await fetch(HF_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${HF_TOKEN}`,
+      },
+      body: JSON.stringify({ message }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ HF Error:", errorText);
+      return res.status(response.status).json({ error: errorText });
+    }
+
+    // 1. Streaming Headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // 2. Handling the Stream safely
+    if (!response.body) {
+      throw new Error("No response body from HF");
+    }
+
+    // Node.js environment mein response.body ReadableStream hota hai
+    // Hum chunks ko direct process karenge
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
 
     try {
-      const response = await fetch(HF_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${HF_TOKEN}`,
-        },
-        body: JSON.stringify({ message }),
-        signal: AbortSignal.timeout(180000)
-      });
-
-      if (response.ok) {
-        // SSE Headers for Streaming
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            res.write(chunk); // Passing tokens to frontend
-          }
-        }
-        return res.end();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        // Flask se "data: token\n\n" format aa raha hai, usse direct bhej do
+        res.write(chunk); 
+        
+        // Agar response bohot fast hai toh flush karne ke liye (Optional)
+        // if (res.flush) res.flush(); 
       }
-
-      // Direct Gemini Fallback if HF Space is Down/404
-      if (apiKey) {
-        console.log("🔄 Falling back to direct Gemini...");
-        const ai = new GoogleGenAI({ apiKey });
-        const geminiRes = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: [{ parts: [{ text: message }] }]
-        });
-        return res.json({ text: geminiRes.text });
-      }
-
-      res.status(response.status).json({ error: "RiShre Core is busy." });
-
-    } catch (error: any) {
-      console.error("⚠️ Connection Failed:", error.message);
-      res.status(500).json({ error: "RiShre Core Unreachable." });
+    } catch (streamError) {
+      console.error("⚠️ Stream interrupted:", streamError);
+    } finally {
+      res.end();
+      console.log("✅ Stream completed successfully.");
     }
-  });
+
+  } catch (error: any) {
+    console.error("⚠️ Server Crash Prevented:", error.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "RiShre Core Link Broken." });
+    }
+  }
+});
 
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== "production") {
