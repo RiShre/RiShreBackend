@@ -1,9 +1,14 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import path from "path";
+import path, { dirname } from "path"; // Dono ko ek saath yahan rakha hai
+import { fileURLToPath } from "url";
 import cors from "cors";
 import { searchWeb } from "./src/services/SearchServices.ts";
 import { GoogleGenAI } from "@google/genai";
+
+// __dirname setup
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 async function startServer() {
   const app = express();
