@@ -61,6 +61,13 @@ const unwrapUrl = (url: string | undefined): string => {
         return decodeURIComponent(encodedUrl);
       }
     }
+    if (url.includes('/url?q=')) {
+      const parts = url.split('/url?q=');
+      if (parts.length > 1) {
+        const encodedUrl = parts[1].split('&')[0];
+        return decodeURIComponent(encodedUrl);
+      }
+    }
     if (url.startsWith('//')) return 'https:' + url;
     return url;
   } catch (e) {
@@ -68,11 +75,92 @@ const unwrapUrl = (url: string | undefined): string => {
   }
 };
 
+function cleanQuery(query: string): string {
+  if (!query) return '';
+  
+  let cleaned = query;
+  // If system prompts are somehow prefixed to the query, strip them
+  if (cleaned.includes('[System Instruction:')) {
+    const parts = cleaned.split(']');
+    cleaned = parts.slice(parts.length - 1).join(']');
+  }
+  
+  // Strip conversational wrappers
+  cleaned = cleaned.replace(/^(who is|what is|tell me about|search for|google search|can you search|please search for|find info on|look up|check the|information about|details on|anything about|who was|who are|what are|search web for|search the web for|find out)\s+/i, '');
+  cleaned = cleaned.replace(/\s+(please|now|urgently|google|search|on the web|on google)$/i, '');
+  cleaned = cleaned.trim();
+  
+  return cleaned || query;
+}
+
 export async function searchWeb(query: string) {
+  const cleanedQuery = cleanQuery(query);
+  console.log(`[RiShre Web Search] Original: "${query}" | Optimized Keywords: "${cleanedQuery}"`);
+
   const engines = [
     {
+      name: 'Google',
+      url: `https://www.google.com/search?q=${encodeURIComponent(cleanedQuery)}&hl=en`,
+      parse: ($: any) => {
+        const results: any[] = [];
+        
+        // 1. Try modern Google desktop JS layout
+        $('div.g').each((i: number, el: any) => {
+          const titleLink = $(el).find('a').first();
+          const titleHex = $(el).find('h3');
+          const snippetNode = $(el).find('div[style*="line-clamp"], .VwiC3b, .s');
+          if (titleLink.length && titleHex.length) {
+            const title = titleHex.text().trim();
+            const rawLink = titleLink.attr('href');
+            const link = unwrapUrl(rawLink);
+            const snippet = snippetNode.text().trim();
+            if (title && link && !link.includes('google.com/')) {
+              results.push({ title, link, snippet });
+            }
+          }
+        });
+
+        // 2. Try standard non-JS basic HTML layout (.kCrYT & .BNeawe)
+        if (results.length === 0) {
+          $('.kCrYT').each((i: number, el: any) => {
+            const linkNode = $(el).find('a').first();
+            const rawLink = linkNode.attr('href');
+            if (rawLink && rawLink.includes('/url?q=')) {
+              const link = unwrapUrl(rawLink);
+              const titleNode = linkNode.find('.BNeawe').first();
+              const title = titleNode.text().trim();
+              
+              if (title && link && !link.includes('google.com/')) {
+                // Find next snippet block
+                const nextContainer = $(el).next('.kCrYT');
+                const snippet = nextContainer.find('.BNeawe.s3v9rd').text().trim() || nextContainer.text().trim();
+                results.push({ title, link, snippet: snippet.substring(0, 300) || "Visit site for details." });
+              }
+            }
+          });
+        }
+
+        // 3. Fallback standard anchor list parsing
+        if (results.length === 0) {
+          $('a').each((i: number, el: any) => {
+            const rawLink = $(el).attr('href');
+            if (rawLink && rawLink.includes('/url?q=')) {
+              const link = unwrapUrl(rawLink);
+              const titleNode = $(el).find('h3, div, span').first();
+              const title = titleNode.text().trim();
+              if (title && link && !link.includes('google.com/')) {
+                const snippet = $(el).closest('div').next().text().trim();
+                results.push({ title, link, snippet: snippet.substring(0, 200) || "Visit site for details." });
+              }
+            }
+          });
+        }
+        return results;
+      }
+    },
+    {
       name: 'DuckDuckGo HTML',
-      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanedQuery)}`,
       parse: ($: any) => {
         const results: any[] = [];
         $('.result').each((i: number, el: any) => {
@@ -90,7 +178,7 @@ export async function searchWeb(query: string) {
     },
     {
       name: 'DuckDuckGo Lite',
-      url: `https://duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+      url: `https://duckduckgo.com/lite/?q=${encodeURIComponent(cleanedQuery)}`,
       parse: ($: any) => {
         const results: any[] = [];
         $('table').last().find('tr').each((i: number, el: any) => {
@@ -108,7 +196,7 @@ export async function searchWeb(query: string) {
     },
     {
       name: 'Bing',
-      url: `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
+      url: `https://www.bing.com/search?q=${encodeURIComponent(cleanedQuery)}`,
       parse: ($: any) => {
         const results: any[] = [];
         $('.b_algo').each((i: number, el: any) => {
@@ -122,7 +210,7 @@ export async function searchWeb(query: string) {
     },
     {
       name: 'Yahoo',
-      url: `https://search.yahoo.com/search?p=${encodeURIComponent(query)}`,
+      url: `https://search.yahoo.com/search?p=${encodeURIComponent(cleanedQuery)}`,
       parse: ($: any) => {
         const results: any[] = [];
         $('.algo').each((i: number, el: any) => {
